@@ -6,7 +6,7 @@ Heavily Modified from RestForce 1.0.0
 DEFAULT_CLIENT_ID_PREFIX = 'RestForce'
 
 
-from simple_salesforce.api import DEFAULT_API_VERSION
+from simple_salesforce.api import DEFAULT_API_VERSION, TIMEOUT
 from simple_salesforce.util import getUniqueElementValueFromXmlString
 from simple_salesforce.util import SalesforceError
 try:
@@ -145,8 +145,8 @@ def SalesforceLogin(
         'SOAPAction': 'login'
     }
     response = (session or requests).post(
-        soap_url, login_soap_request_body, headers=login_soap_request_headers,
-        proxies=proxies)
+        url=soap_url, data=login_soap_request_body, headers=login_soap_request_headers,
+        proxies=proxies, timeout=TIMEOUT)
 
     if response.status_code != 200:
         except_code = getUniqueElementValueFromXmlString(

@@ -3,6 +3,7 @@
 
 # has to be defined prior to login import
 DEFAULT_API_VERSION = '29.0'
+TIMEOUT = 60
 
 
 import logging
@@ -37,8 +38,40 @@ def _warn_request_deprecation():
     )
 
 
+class RequestMixin(object):
+    def __init__(self, session=None):
+        """
+        Mixin class to encapsulate all remote operations
+        * session -- Request's session object
+        """
+        self.session = session or requests.Session()
+        self.session_id = "sessionId"
+        self.name = ""
+
+    def _call_salesforce(self, method, url, **kwargs):
+        """Utility method for performing HTTP call to Salesforce.
+
+        Returns a `requests.result` object.
+        """
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + self.session_id,
+            'X-PrettyPrint': '1'
+        }
+        additional_headers = kwargs.pop('headers', dict())
+        headers.update(additional_headers or dict())
+        timeout = kwargs.pop('timeout', TIMEOUT)
+        result = self.session.request(method=method, url=url, headers=headers,
+                                      timeout=timeout, **kwargs)
+
+        if result.status_code >= 300:
+            _exception_handler(result, self.name)
+
+        return result
+
+
 # pylint: disable=too-many-instance-attributes
-class Salesforce(object):
+class Salesforce(RequestMixin):
     """Salesforce Instance
 
     An instance of Salesforce is a handy way to wrap a Salesforce session
@@ -85,9 +118,9 @@ class Salesforce(object):
 
         # Determine if the user passed in the optional version and/or sandbox
         # kwargs
+        super(Salesforce, self).__init__(session=session)
         self.sf_version = version
         self.sandbox = sandbox
-        self.session = session or requests.Session()
         self.proxies = self.session.proxies
         # override custom session proxies dance
         if proxies is not None:
@@ -152,12 +185,6 @@ class Salesforce(object):
             self.auth_site = 'https://test.salesforce.com'
         else:
             self.auth_site = 'https://login.salesforce.com'
-
-        self.headers = {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + self.session_id,
-            'X-PrettyPrint': '1'
-        }
 
         self.base_url = ('https://{instance}/services/data/v{version}/'
                          .format(instance=self.sf_instance,
@@ -421,19 +448,6 @@ class Salesforce(object):
                 response_content = result.text
             return response_content
 
-    def _call_salesforce(self, method, url, **kwargs):
-        """Utility method for performing HTTP call to Salesforce.
-
-        Returns a `requests.result` object.
-        """
-        result = self.session.request(
-            method, url, headers=self.headers, **kwargs)
-
-        if result.status_code >= 300:
-            _exception_handler(result)
-
-        return result
-
     @property
     def request(self):
         """Deprecated access to self.session for backwards compatibility"""
@@ -447,7 +461,7 @@ class Salesforce(object):
         self.session = session
 
 
-class SFType(object):
+class SFType(RequestMixin):
     """An interface to a specific type of SObject"""
 
     # pylint: disable=too-many-arguments
@@ -468,9 +482,9 @@ class SFType(object):
                      enables the use of requests Session features not otherwise
                      exposed by simple_salesforce.
         """
+        super(SFType, self).__init__(session=session)
         self.session_id = session_id
         self.name = object_name
-        self.session = session or requests.Session()
         # don't wipe out original proxies with None
         if not session and proxies is not None:
             self.session.proxies = proxies
@@ -693,25 +707,6 @@ class SFType(object):
         result = self._call_salesforce(method='GET', url=url, headers=headers)
         return result.json(object_pairs_hook=OrderedDict)
 
-    def _call_salesforce(self, method, url, **kwargs):
-        """Utility method for performing HTTP call to Salesforce.
-
-        Returns a `requests.result` object.
-        """
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + self.session_id,
-            'X-PrettyPrint': '1'
-        }
-        additional_headers = kwargs.pop('headers', dict())
-        headers.update(additional_headers or dict())
-        result = self.session.request(method, url, headers=headers, **kwargs)
-
-        if result.status_code >= 300:
-            _exception_handler(result, self.name)
-
-        return result
-
     # pylint: disable=no-self-use
     def _raw_response(self, response, body_flag):
         """Utility method for processing the response and returning either the
@@ -747,7 +742,7 @@ class SalesforceAPI(Salesforce):
     """
     # pylint: disable=too-many-arguments
     def __init__(self, username, password, security_token, sandbox=False,
-                 sf_version='27.0'):
+                 sf_version=DEFAULT_API_VERSION):
         """Initialize the instance with the given parameters.
 
         Arguments:

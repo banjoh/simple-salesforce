@@ -31,7 +31,9 @@ from simple_salesforce.api import (
     SalesforceRefusedRequest,
     SalesforceResourceNotFound,
     SalesforceGeneralError,
-    SFType
+    SFType,
+    RequestMixin,
+    TIMEOUT
 )
 
 
@@ -563,7 +565,7 @@ class TestSalesforce(unittest.TestCase):
 
         with patch('simple_salesforce.api.logger.warning') as mock_log:
             client = Salesforce(session_id=tests.SESSION_ID,
-                instance_url=tests.SERVER_URL, session=session, proxies={})
+                                instance_url=tests.SERVER_URL, session=session, proxies={})
             self.assertIn('ignoring proxies', mock_log.call_args[0][0])
             self.assertIs(tests.PROXIES, client.session.proxies)
 
@@ -635,3 +637,48 @@ class TestExceptionHandler(unittest.TestCase):
         self.assertEqual(str(cm.exception), (
             'Error Code 500. Response content'
             ': Example Content'))
+
+
+class TestRequestMixin(unittest.TestCase):
+    def setUp(self):
+        self.mock_resp = Mock()
+        self.mock_resp.status_code = 200
+        mock_sess = Mock()
+        mock_sess.request.return_value = self.mock_resp
+        self.mixin = RequestMixin(session=mock_sess)
+        self.mock_req = mock_sess.request
+
+    def test_default_init(self):
+        inst = RequestMixin()
+        self.assertIsInstance(inst.session, requests.Session)
+        self.assertEqual(inst.name, "")
+        self.assertEqual(inst.session_id, "sessionId")
+
+    def test_init_with_session(self):
+        sess = requests.Session()
+        inst = RequestMixin(session=sess)
+        self.assertIs(inst.session, sess)
+
+    def test_make_request(self):
+        self.mixin.session_id = "MyVeryCrypticSessionIDASDF"
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + self.mixin.session_id,
+            'X-PrettyPrint': '1'
+        }
+        rsp = self.mixin._call_salesforce(method='GET', url='http//remote.host')
+        self.assertEqual(rsp, self.mock_resp)
+        self.mock_req.assert_called_once_with(method='GET', url='http//remote.host',
+                                              headers=headers, timeout=TIMEOUT)
+
+    def test_error_request(self):
+        with self.assertRaises(SalesforceMalformedRequest):
+            self.mock_resp.status_code = 400
+            self.mixin._call_salesforce(method='GET', url='http//remote.host')
+
+
+
+
+
+
+
